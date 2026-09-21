@@ -1,0 +1,43 @@
+services:
+  source_db:
+    image: postgres:16
+    container_name: northwind_source
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SOURCE_DB_USER}
+      POSTGRES_PASSWORD: ${SOURCE_DB_PASSWORD}
+      POSTGRES_DB: ${SOURCE_DB_NAME}
+    ports:
+      - "${SOURCE_DB_PORT}:5432"
+    volumes:
+      - source_data:/var/lib/postgresql/data
+      # Les scripts .sql placés ici s'exécutent au 1er démarrage (volume vide)
+      - ./sql/source:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SOURCE_DB_USER} -d ${SOURCE_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  dw_db:
+    image: postgres:16
+    container_name: northwind_dw
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DW_DB_USER}
+      POSTGRES_PASSWORD: ${DW_DB_PASSWORD}
+      POSTGRES_DB: ${DW_DB_NAME}
+    ports:
+      - "${DW_DB_PORT}:5432"
+    volumes:
+      - dw_data:/var/lib/postgresql/data
+      - ./sql/dw:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DW_DB_USER} -d ${DW_DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  source_data:
+  dw_data:
