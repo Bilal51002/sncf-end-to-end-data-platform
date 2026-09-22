@@ -15,3 +15,7 @@ venv/
 
 # Airflow (plus tard)
 logs/
+
+# Raw data
+data/
+"data/" 

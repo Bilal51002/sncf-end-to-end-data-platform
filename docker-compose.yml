@@ -1,7 +1,7 @@
 services:
   source_db:
     image: postgres:16
-    container_name: northwind_source
+    container_name: sncf_source
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${SOURCE_DB_USER}
@@ -13,6 +13,8 @@ services:
       - source_data:/var/lib/postgresql/data
       # Les scripts .sql placés ici s'exécutent au 1er démarrage (volume vide)
       - ./sql/source:/docker-entrypoint-initdb.d:ro
+      # Les CSV, montés en lecture seule pour être chargés avec \copy
+      - ./data:/data:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${SOURCE_DB_USER} -d ${SOURCE_DB_NAME}"]
       interval: 5s
@@ -21,7 +23,7 @@ services:
 
   dw_db:
     image: postgres:16
-    container_name: northwind_dw
+    container_name: sncf_dw
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DW_DB_USER}
