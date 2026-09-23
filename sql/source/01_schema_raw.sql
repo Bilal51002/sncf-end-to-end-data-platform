@@ -1,11 +1,3 @@
--- =====================================================================
--- Landing zone : copie quasi brute des CSV, dans la base "source".
--- Chargée avec \copy (psql) depuis data/raw/*.csv.
--- Aucune transformation métier ici : on garde les colonnes redondantes
--- ou incohérentes telles quelles (ex: les deux colonnes "année de mise
--- en service" de GARE), le nettoyage se fait au chargement du DW.
--- =====================================================================
-
 CREATE SCHEMA IF NOT EXISTS raw;
 
 CREATE TABLE IF NOT EXISTS raw.client (
