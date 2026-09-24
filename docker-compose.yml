@@ -1,45 +1,215 @@
 services:
+
+  # ============================================================
+  # SOURCE DATABASE
+  # ============================================================
   source_db:
     image: postgres:16
     container_name: sncf_source
     restart: unless-stopped
+
     environment:
+      POSTGRES_DB: ${SOURCE_DB_NAME}
       POSTGRES_USER: ${SOURCE_DB_USER}
       POSTGRES_PASSWORD: ${SOURCE_DB_PASSWORD}
-      POSTGRES_DB: ${SOURCE_DB_NAME}
+
     ports:
       - "${SOURCE_DB_PORT}:5432"
-    volumes:
-      - source_data:/var/lib/postgresql/data
-      # Les scripts .sql placés ici s'exécutent au 1er démarrage (volume vide)
-      - ./sql/source:/docker-entrypoint-initdb.d:ro
-      # Les CSV, montés en lecture seule pour être chargés avec \copy
-      - ./data:/data:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${SOURCE_DB_USER} -d ${SOURCE_DB_NAME}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
+    volumes:
+      - source_db_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${SOURCE_DB_USER} -d ${SOURCE_DB_NAME}"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # ============================================================
+  # DATA WAREHOUSE DATABASE
+  # ============================================================
   dw_db:
     image: postgres:16
     container_name: sncf_dw
     restart: unless-stopped
+
     environment:
+      POSTGRES_DB: ${DW_DB_NAME}
       POSTGRES_USER: ${DW_DB_USER}
       POSTGRES_PASSWORD: ${DW_DB_PASSWORD}
-      POSTGRES_DB: ${DW_DB_NAME}
+
     ports:
       - "${DW_DB_PORT}:5432"
-    volumes:
-      - dw_data:/var/lib/postgresql/data
-      - ./sql/dw:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DW_DB_USER} -d ${DW_DB_NAME}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
+    volumes:
+      - dw_db_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DW_DB_USER} -d ${DW_DB_NAME}"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # ============================================================
+  # AIRFLOW METADATA DATABASE
+  # ============================================================
+  airflow-postgres:
+    image: postgres:16
+    container_name: airflow-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U airflow -d airflow"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  # ============================================================
+  # AIRFLOW INIT
+  # ============================================================
+  airflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+
+    container_name: airflow-init
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+
+      # Airflow 3 authentication manager
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+
+      # Allow Airflow to load local source code
+      PYTHONPATH: /opt/airflow
+
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/src
+
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate
+
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Bilal \
+          --lastname Khallabi \
+          --role Admin \
+          --email admin@example.com || true
+
+
+  # ============================================================
+  # AIRFLOW API SERVER
+  # ============================================================
+  airflow-api-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+
+    container_name: airflow-api-server
+    restart: unless-stopped
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+
+      # Airflow 3 authentication manager
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+
+      PYTHONPATH: /opt/airflow
+
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/src
+
+    ports:
+      - "8080:8080"
+
+    command:
+      - bash
+      - -c
+      - |
+        airflow api-server --host 0.0.0.0 --port 8080
+
+
+  # ============================================================
+  # AIRFLOW SCHEDULER
+  # ============================================================
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+
+    container_name: airflow-scheduler
+    restart: unless-stopped
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+
+      # Airflow 3 authentication manager
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+
+      PYTHONPATH: /opt/airflow
+
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/src
+
+    command:
+      - bash
+      - -c
+      - |
+        airflow scheduler
+
+
+# ============================================================
+# VOLUMES
+# ============================================================
 volumes:
-  source_data:
-  dw_data:
+  source_db_data:
+  dw_db_data:
+  airflow_postgres_data:
