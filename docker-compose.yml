@@ -72,6 +72,12 @@ services:
       POSTGRES_DB: airflow
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
+      SOURCE_DB_HOST: source_db
+      SOURCE_DB_PORT: "5432"
+      DW_DB_HOST: dw_db
+      DW_DB_PORT: "5432"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
 
     volumes:
       - airflow_postgres_data:/var/lib/postgresql/data
@@ -103,6 +109,14 @@ services:
 
     environment:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      SOURCE_DB_HOST: source_db
+      SOURCE_DB_PORT: "5432"
+      DW_DB_HOST: dw_db
+      DW_DB_PORT: "5432"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
 
       # Airflow 3 authentication manager
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
@@ -145,14 +159,24 @@ services:
     depends_on:
       airflow-postgres:
         condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
 
     environment:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
 
       # Airflow 3 authentication manager
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
       PYTHONPATH: /opt/airflow
+      SOURCE_DB_HOST: source_db
+      SOURCE_DB_PORT: "5432"
+      DW_DB_HOST: dw_db
+      DW_DB_PORT: "5432"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
 
     volumes:
       - ./dags:/opt/airflow/dags
@@ -184,15 +208,24 @@ services:
     depends_on:
       airflow-postgres:
         condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
 
     environment:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
 
       # Airflow 3 authentication manager
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
       PYTHONPATH: /opt/airflow
-
+      SOURCE_DB_HOST: source_db
+      SOURCE_DB_PORT: "5432"
+      DW_DB_HOST: dw_db
+      DW_DB_PORT: "5432"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -206,6 +239,102 @@ services:
         airflow scheduler
 
 
+  # ============================================================
+  # AIRFLOW DAG PROCESSOR
+  # Depuis Airflow 3.0, l'analyse des fichiers DAG est un service à
+  # part entière, séparé du scheduler. Sans lui, aucun DAG n'apparaît
+  # dans l'interface (composant "Dag Processor" rouge sur /home).
+  # ============================================================
+  airflow-dag-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+
+    container_name: airflow-dag-processor
+    restart: unless-stopped
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+
+      PYTHONPATH: /opt/airflow
+      SOURCE_DB_HOST: source_db
+      SOURCE_DB_PORT: "5432"
+      DW_DB_HOST: dw_db
+      DW_DB_PORT: "5432"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/src
+
+    command:
+      - bash
+      - -c
+      - |
+        airflow dag-processor
+
+
+  # ============================================================
+  # AIRFLOW TRIGGERER
+  # Nécessaire pour les opérateurs différables (sensors en mode
+  # "reschedule", capteurs asynchrones). Sans lui, composant
+  # "Triggerer" rouge sur /home ; sans incidence sur un DAG simple
+  # sans capteur différable, mais Airflow 3 s'attend à le trouver.
+  # ============================================================
+  airflow-triggerer:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+
+    container_name: airflow-triggerer
+    restart: unless-stopped
+
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+
+      PYTHONPATH: /opt/airflow
+      SOURCE_DB_HOST: source_db
+      SOURCE_DB_PORT: "5432"
+      DW_DB_HOST: dw_db
+      DW_DB_PORT: "5432"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./src:/opt/airflow/src
+
+    command:
+      - bash
+      - -c
+      - |
+        airflow triggerer
+
+
 # ============================================================
 # VOLUMES
 # ============================================================
@@ -213,3 +342,5 @@ volumes:
   source_db_data:
   dw_db_data:
   airflow_postgres_data:
+
+

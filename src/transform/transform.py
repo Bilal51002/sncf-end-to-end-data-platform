@@ -1,12 +1,4 @@
-"""
-Transformation : nettoyage des donnees raw et mise en forme pour le DW
-(schema en constellation). Contient aussi les corrections de qualite de
-donnees identifiees au profilage (voir README) :
-- casse de `ville` non uniforme
-- `sexe` incoherent (formes longues vs abregees)
-- `electrification` texte -> booleen
-- doublon annee_mise_en_service / annee_mise_service dans raw.gare
-"""
+
 import pandas as pd
 
 
@@ -17,10 +9,7 @@ def _to_date_key(date_series: pd.Series) -> pd.Series:
 
 
 def _normalize_sexe(sexe_series: pd.Series) -> pd.Series:
-    """
-    Normalise les valeurs heterogenes de sexe ('F', 'Femme', 'Homme', 'M', ...)
-    vers un seul caractere, pour respecter dw.dim_client.sexe (varchar(1)).
-    """
+
     mapping = {
         "homme": "H",
         "femme": "F",
@@ -39,9 +28,6 @@ def _normalize_ville(ville_series: pd.Series) -> pd.Series:
     return ville_series.astype(str).str.strip().str.title()
 
 
-# ------------------------------------------------------------------
-# Dimensions
-# ------------------------------------------------------------------
 
 def transform_dim_client(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
