@@ -18,6 +18,7 @@ services:
 
     volumes:
       - source_db_data:/var/lib/postgresql/data
+      - ./data:/data:ro
 
     healthcheck:
       test:
@@ -62,6 +63,7 @@ services:
 
   # ============================================================
   # AIRFLOW METADATA DATABASE
+  # (simple conteneur Postgres : n'a besoin d'aucune variable Airflow)
   # ============================================================
   airflow-postgres:
     image: postgres:16
@@ -72,12 +74,6 @@ services:
       POSTGRES_DB: airflow
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
-      SOURCE_DB_HOST: source_db
-      SOURCE_DB_PORT: "5432"
-      DW_DB_HOST: dw_db
-      DW_DB_PORT: "5432"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
 
     volumes:
       - airflow_postgres_data:/var/lib/postgresql/data
@@ -111,18 +107,28 @@ services:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
-      SOURCE_DB_HOST: source_db
-      SOURCE_DB_PORT: "5432"
-      DW_DB_HOST: dw_db
-      DW_DB_PORT: "5432"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
 
       # Airflow 3 authentication manager
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
+      # Airflow 3 (AIP-72) : les taches communiquent avec le scheduler via
+      # une API HTTP, pas par acces direct a la base. Sans ces variables,
+      # identiques sur tous les services, chaque tache echoue avec
+      # "Connection refused" ou "Invalid auth token".
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+      # Duree de vie du jeton (secondes) : le defaut est trop court pour
+      # des taches qui transforment plusieurs millions de lignes.
+      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
+
       # Allow Airflow to load local source code
       PYTHONPATH: /opt/airflow
+
+      # Bases de donnees du pipeline (noms de service Docker, pas localhost)
+      SOURCE_DB_HOST: source_db
+      SOURCE_DB_PORT: "5432"
+      DW_DB_HOST: dw_db
+      DW_DB_PORT: "5432"
 
     volumes:
       - ./dags:/opt/airflow/dags
@@ -167,16 +173,18 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
 
-      # Airflow 3 authentication manager
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
+
       PYTHONPATH: /opt/airflow
+
       SOURCE_DB_HOST: source_db
       SOURCE_DB_PORT: "5432"
       DW_DB_HOST: dw_db
       DW_DB_PORT: "5432"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
 
     volumes:
       - ./dags:/opt/airflow/dags
@@ -216,16 +224,19 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
 
-      # Airflow 3 authentication manager
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
+
       PYTHONPATH: /opt/airflow
+
       SOURCE_DB_HOST: source_db
       SOURCE_DB_PORT: "5432"
       DW_DB_HOST: dw_db
       DW_DB_PORT: "5432"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -241,9 +252,6 @@ services:
 
   # ============================================================
   # AIRFLOW DAG PROCESSOR
-  # Depuis Airflow 3.0, l'analyse des fichiers DAG est un service à
-  # part entière, séparé du scheduler. Sans lui, aucun DAG n'apparaît
-  # dans l'interface (composant "Dag Processor" rouge sur /home).
   # ============================================================
   airflow-dag-processor:
     build:
@@ -266,13 +274,16 @@ services:
 
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
+
       PYTHONPATH: /opt/airflow
+
       SOURCE_DB_HOST: source_db
       SOURCE_DB_PORT: "5432"
       DW_DB_HOST: dw_db
       DW_DB_PORT: "5432"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
 
     volumes:
       - ./dags:/opt/airflow/dags
@@ -289,10 +300,6 @@ services:
 
   # ============================================================
   # AIRFLOW TRIGGERER
-  # Nécessaire pour les opérateurs différables (sensors en mode
-  # "reschedule", capteurs asynchrones). Sans lui, composant
-  # "Triggerer" rouge sur /home ; sans incidence sur un DAG simple
-  # sans capteur différable, mais Airflow 3 s'attend à le trouver.
   # ============================================================
   airflow-triggerer:
     build:
@@ -315,13 +322,17 @@ services:
 
       AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
+
       PYTHONPATH: /opt/airflow
+
       SOURCE_DB_HOST: source_db
       SOURCE_DB_PORT: "5432"
       DW_DB_HOST: dw_db
       DW_DB_PORT: "5432"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -342,5 +353,3 @@ volumes:
   source_db_data:
   dw_db_data:
   airflow_postgres_data:
-
-
