@@ -6,6 +6,7 @@ Postgres soient demarres et que le pipeline ait deja ete execute au moins
 une fois (dw peuple). S'ils ne sont pas joignables, ces tests sont
 automatiquement "skip" plutot que d'echouer bruyamment.
 """
+
 import sys
 from pathlib import Path
 
@@ -36,5 +37,7 @@ def source_engine():
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
     except Exception:
-        pytest.skip("Base source injoignable : demarre les containers Docker pour lancer ces tests.")
+        pytest.skip(
+            "Base source injoignable : demarre les containers Docker pour lancer ces tests."
+        )
     return engine

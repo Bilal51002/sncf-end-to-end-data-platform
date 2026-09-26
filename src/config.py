@@ -2,7 +2,9 @@
 Configuration du pipeline ETL : lecture des variables d'environnement (.env)
 et construction des URLs de connexion SQLAlchemy pour les deux bases.
 """
+
 import os
+
 from dotenv import load_dotenv
 
 # Cherche le .env a la racine du projet (deux niveaux au-dessus de ce fichier :
@@ -27,8 +29,7 @@ SOURCE_DB_URL = (
     f"@{SOURCE_DB_HOST}:{SOURCE_DB_PORT}/{SOURCE_DB_NAME}"
 )
 DW_DB_URL = (
-    f"postgresql+psycopg2://{DW_DB_USER}:{DW_DB_PASSWORD}"
-    f"@{DW_DB_HOST}:{DW_DB_PORT}/{DW_DB_NAME}"
+    f"postgresql+psycopg2://{DW_DB_USER}:{DW_DB_PASSWORD}@{DW_DB_HOST}:{DW_DB_PORT}/{DW_DB_NAME}"
 )
 
 # Taille des lots pour le traitement des grandes tables (trajet, reservation)

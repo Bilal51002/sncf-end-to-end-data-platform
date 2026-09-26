@@ -3,6 +3,7 @@ Chargement dans le DW. Utilise COPY (via psycopg2) plutot que des INSERT
 un par un : indispensable pour charger 6 a 10 millions de lignes en un temps
 raisonnable.
 """
+
 import csv
 import io
 
@@ -40,8 +41,12 @@ def load_dataframe(conn, df: pd.DataFrame, table: str, columns: list[str]) -> in
 
     buffer = io.StringIO()
     df[columns].to_csv(
-        buffer, index=False, header=False, sep="\t",
-        na_rep="\\N", quoting=csv.QUOTE_MINIMAL,
+        buffer,
+        index=False,
+        header=False,
+        sep="\t",
+        na_rep="\\N",
+        quoting=csv.QUOTE_MINIMAL,
     )
     buffer.seek(0)
 

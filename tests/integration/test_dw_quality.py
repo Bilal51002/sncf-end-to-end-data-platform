@@ -8,12 +8,13 @@ Sinon, ces tests sont automatiquement "skip" (voir conftest.py).
 Les requetes utilisent des agregats SQL (COUNT, pas de lecture ligne a
 ligne) pour rester rapides malgre les volumes (6M / 10M lignes).
 """
-from sqlalchemy import text
 
+from sqlalchemy import text
 
 # ------------------------------------------------------------------
 # Volumetrie : dw doit correspondre a raw (aucune perte lors du ETL)
 # ------------------------------------------------------------------
+
 
 def _count(engine, schema, table):
     with engine.connect() as conn:
@@ -34,7 +35,9 @@ class TestVolumetrie:
         assert _count(dw_engine, "dw", "fact_trajet") == _count(source_engine, "raw", "trajet")
 
     def test_fact_reservation_complet(self, source_engine, dw_engine):
-        assert _count(dw_engine, "dw", "fact_reservation") == _count(source_engine, "raw", "reservation")
+        assert _count(dw_engine, "dw", "fact_reservation") == _count(
+            source_engine, "raw", "reservation"
+        )
 
 
 # ------------------------------------------------------------------
@@ -42,29 +45,37 @@ class TestVolumetrie:
 # on le revalide ici explicitement comme regle de qualite documentee)
 # ------------------------------------------------------------------
 
+
 class TestUnicite:
     def test_id_client_unique_dans_dim_client(self, dw_engine):
         with dw_engine.connect() as conn:
             total = conn.execute(text("SELECT count(*) FROM dw.dim_client")).scalar()
-            distinct = conn.execute(text("SELECT count(DISTINCT id_client) FROM dw.dim_client")).scalar()
+            distinct = conn.execute(
+                text("SELECT count(DISTINCT id_client) FROM dw.dim_client")
+            ).scalar()
         assert total == distinct
 
     def test_id_trajet_unique_dans_fact_trajet(self, dw_engine):
         with dw_engine.connect() as conn:
             total = conn.execute(text("SELECT count(*) FROM dw.fact_trajet")).scalar()
-            distinct = conn.execute(text("SELECT count(DISTINCT id_trajet) FROM dw.fact_trajet")).scalar()
+            distinct = conn.execute(
+                text("SELECT count(DISTINCT id_trajet) FROM dw.fact_trajet")
+            ).scalar()
         assert total == distinct
 
     def test_id_reservation_unique_dans_fact_reservation(self, dw_engine):
         with dw_engine.connect() as conn:
             total = conn.execute(text("SELECT count(*) FROM dw.fact_reservation")).scalar()
-            distinct = conn.execute(text("SELECT count(DISTINCT id_reservation) FROM dw.fact_reservation")).scalar()
+            distinct = conn.execute(
+                text("SELECT count(DISTINCT id_reservation) FROM dw.fact_reservation")
+            ).scalar()
         assert total == distinct
 
 
 # ------------------------------------------------------------------
 # Corrections de qualite issues du profilage (voir README)
 # ------------------------------------------------------------------
+
 
 class TestQualiteProfilage:
     def test_sexe_uniquement_h_ou_f(self, dw_engine):
@@ -79,14 +90,18 @@ class TestQualiteProfilage:
         """Detecte les cas ou la normalisation de casse aurait echoue (ex: 'STRASBOURG')."""
         with dw_engine.connect() as conn:
             count = conn.execute(
-                text("SELECT count(*) FROM dw.dim_client WHERE ville = UPPER(ville) AND LENGTH(ville) > 1")
+                text(
+                    "SELECT count(*) FROM dw.dim_client WHERE ville = UPPER(ville) AND LENGTH(ville) > 1"
+                )
             ).scalar()
         assert count == 0
 
     def test_ville_pas_entierement_minuscule(self, dw_engine):
         with dw_engine.connect() as conn:
             count = conn.execute(
-                text("SELECT count(*) FROM dw.dim_client WHERE ville = LOWER(ville) AND LENGTH(ville) > 1")
+                text(
+                    "SELECT count(*) FROM dw.dim_client WHERE ville = LOWER(ville) AND LENGTH(ville) > 1"
+                )
             ).scalar()
         assert count == 0
 
@@ -107,6 +122,7 @@ class TestQualiteProfilage:
 # ------------------------------------------------------------------
 # Regles metier
 # ------------------------------------------------------------------
+
 
 class TestReglesMetier:
     def test_montant_total_coherent_avec_prix_et_passagers(self, dw_engine):
@@ -177,6 +193,7 @@ class TestReglesMetier:
 # Integrite referentielle (deja garantie par les FK en base ; on la
 # revalide explicitement comme filet de securite documente)
 # ------------------------------------------------------------------
+
 
 class TestIntegriteReferentielle:
     def test_aucune_reservation_orpheline(self, dw_engine):

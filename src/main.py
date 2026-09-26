@@ -13,44 +13,89 @@ Etapes :
 4. fact_reservation : par lots, avec resolution des cles (dont trajet_key,
    qui necessite que fact_trajet soit deja charge)
 """
+
 import time
 
 from . import config
-from .db import get_source_engine, get_dw_engine, get_dw_connection
-from .extract.extract import extract_full, extract_chunks
+from .db import get_dw_connection, get_dw_engine, get_source_engine
+from .extract.extract import extract_chunks, extract_full
+from .load.load import fetch_key_map, load_dataframe, truncate_dw
 from .transform.transform import (
     transform_dim_client,
     transform_dim_gare,
     transform_dim_train,
-    transform_fact_trajet,
     transform_fact_reservation,
+    transform_fact_trajet,
 )
-from .load.load import truncate_dw, load_dataframe, fetch_key_map
 
 DIM_CLIENT_COLS = [
-    "id_client", "nom", "prenom", "date_naissance", "sexe", "type_client",
-    "ville", "code_postal", "pays", "email", "telephone",
-    "date_creation_compte", "statut_compte",
+    "id_client",
+    "nom",
+    "prenom",
+    "date_naissance",
+    "sexe",
+    "type_client",
+    "ville",
+    "code_postal",
+    "pays",
+    "email",
+    "telephone",
+    "date_creation_compte",
+    "statut_compte",
 ]
 DIM_GARE_COLS = [
-    "id_gare", "nom_gare", "ville", "region", "pays", "nb_quais",
-    "type_gare", "taille_gare", "electrification",
-    "annee_mise_en_service", "latitude", "longitude", "categorie_strategique",
+    "id_gare",
+    "nom_gare",
+    "ville",
+    "region",
+    "pays",
+    "nb_quais",
+    "type_gare",
+    "taille_gare",
+    "electrification",
+    "annee_mise_en_service",
+    "latitude",
+    "longitude",
+    "categorie_strategique",
 ]
 DIM_TRAIN_COLS = [
-    "id_train", "code_train", "type_train", "capacite_totale",
-    "capacite_classe1", "capacite_classe2",
-    "ville_depart_base", "ville_arrivee_base",
-    "annee_mise_en_service", "statut_train", "duree_estimee_minutes", "energie",
+    "id_train",
+    "code_train",
+    "type_train",
+    "capacite_totale",
+    "capacite_classe1",
+    "capacite_classe2",
+    "ville_depart_base",
+    "ville_arrivee_base",
+    "annee_mise_en_service",
+    "statut_train",
+    "duree_estimee_minutes",
+    "energie",
 ]
 FACT_TRAJET_COLS = [
-    "id_trajet", "date_key", "train_key", "gare_depart_key", "gare_arrivee_key",
-    "heure_depart", "heure_arrivee_prevue", "distance_km", "statut_circulation",
+    "id_trajet",
+    "date_key",
+    "train_key",
+    "gare_depart_key",
+    "gare_arrivee_key",
+    "heure_depart",
+    "heure_arrivee_prevue",
+    "distance_km",
+    "statut_circulation",
 ]
 FACT_RESERVATION_COLS = [
-    "id_reservation", "date_key", "client_key", "trajet_key",
-    "tarif_type", "classe_reservee", "prix_unitaire", "nb_passagers",
-    "montant_total", "canal_vente", "mode_paiement", "statut_reservation",
+    "id_reservation",
+    "date_key",
+    "client_key",
+    "trajet_key",
+    "tarif_type",
+    "classe_reservee",
+    "prix_unitaire",
+    "nb_passagers",
+    "montant_total",
+    "canal_vente",
+    "mode_paiement",
+    "statut_reservation",
 ]
 
 
@@ -104,9 +149,7 @@ def run() -> None:
         log(f"fact_trajet termine : {total} lignes au total")
 
         # Mapping id_trajet -> trajet_key, necessaire pour fact_reservation
-        fact_trajet_map = fetch_key_map(
-            dw_engine, "fact_trajet", "id_trajet", "trajet_key"
-        )
+        fact_trajet_map = fetch_key_map(dw_engine, "fact_trajet", "id_trajet", "trajet_key")
 
         # ---------------- fact_reservation (par lots) ----------------
         log(f"Chargement de fact_reservation par lots de {config.CHUNK_SIZE}...")
@@ -114,12 +157,8 @@ def run() -> None:
         for i, chunk in enumerate(
             extract_chunks(source_engine, "reservation", config.CHUNK_SIZE), start=1
         ):
-            transformed = transform_fact_reservation(
-                chunk, dim_client_map, fact_trajet_map
-            )
-            n = load_dataframe(
-                dw_conn, transformed, "fact_reservation", FACT_RESERVATION_COLS
-            )
+            transformed = transform_fact_reservation(chunk, dim_client_map, fact_trajet_map)
+            n = load_dataframe(dw_conn, transformed, "fact_reservation", FACT_RESERVATION_COLS)
             total += n
             log(f"  lot {i} : {n} lignes chargees (cumul : {total})")
         log(f"fact_reservation termine : {total} lignes au total")

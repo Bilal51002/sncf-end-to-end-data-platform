@@ -1,4 +1,3 @@
-
 import pandas as pd
 
 
@@ -28,15 +27,24 @@ def _normalize_ville(ville_series: pd.Series) -> pd.Series:
     return ville_series.astype(str).str.strip().str.title()
 
 
-
 def transform_dim_client(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["sexe"] = _normalize_sexe(out["sexe"])
     out["ville"] = _normalize_ville(out["ville"])
     cols = [
-        "id_client", "nom", "prenom", "date_naissance", "sexe", "type_client",
-        "ville", "code_postal", "pays", "email", "telephone",
-        "date_creation_compte", "statut_compte",
+        "id_client",
+        "nom",
+        "prenom",
+        "date_naissance",
+        "sexe",
+        "type_client",
+        "ville",
+        "code_postal",
+        "pays",
+        "email",
+        "telephone",
+        "date_creation_compte",
+        "statut_compte",
     ]
     return out[cols]
 
@@ -49,13 +57,21 @@ def transform_dim_gare(df: pd.DataFrame) -> pd.DataFrame:
     )
     # doublon de colonne dans raw : on garde annee_mise_en_service, on comble
     # les trous avec annee_mise_service si besoin
-    out["annee_mise_en_service"] = out["annee_mise_en_service"].fillna(
-        out["annee_mise_service"]
-    )
+    out["annee_mise_en_service"] = out["annee_mise_en_service"].fillna(out["annee_mise_service"])
     cols = [
-        "id_gare", "nom_gare", "ville", "region", "pays", "nb_quais",
-        "type_gare", "taille_gare", "electrification",
-        "annee_mise_en_service", "latitude", "longitude", "categorie_strategique",
+        "id_gare",
+        "nom_gare",
+        "ville",
+        "region",
+        "pays",
+        "nb_quais",
+        "type_gare",
+        "taille_gare",
+        "electrification",
+        "annee_mise_en_service",
+        "latitude",
+        "longitude",
+        "categorie_strategique",
     ]
     return out[cols]
 
@@ -65,10 +81,18 @@ def transform_dim_train(df: pd.DataFrame) -> pd.DataFrame:
     out["ville_depart_base"] = _normalize_ville(out["ville_depart"])
     out["ville_arrivee_base"] = _normalize_ville(out["ville_arrivee"])
     cols = [
-        "id_train", "code_train", "type_train", "capacite_totale",
-        "capacite_classe1", "capacite_classe2",
-        "ville_depart_base", "ville_arrivee_base",
-        "annee_mise_en_service", "statut_train", "duree_estimee_minutes", "energie",
+        "id_train",
+        "code_train",
+        "type_train",
+        "capacite_totale",
+        "capacite_classe1",
+        "capacite_classe2",
+        "ville_depart_base",
+        "ville_arrivee_base",
+        "annee_mise_en_service",
+        "statut_train",
+        "duree_estimee_minutes",
+        "energie",
     ]
     return out[cols]
 
@@ -76,6 +100,7 @@ def transform_dim_train(df: pd.DataFrame) -> pd.DataFrame:
 # ------------------------------------------------------------------
 # Faits
 # ------------------------------------------------------------------
+
 
 def transform_fact_trajet(
     df: pd.DataFrame, dim_train_map: pd.DataFrame, dim_gare_map: pd.DataFrame
@@ -100,8 +125,15 @@ def transform_fact_trajet(
     out = out.merge(gare_arrivee, on="id_gare_arrivee", how="inner")
 
     cols = [
-        "id_trajet", "date_key", "train_key", "gare_depart_key", "gare_arrivee_key",
-        "heure_depart", "heure_arrivee_prevue", "distance_km", "statut_circulation",
+        "id_trajet",
+        "date_key",
+        "train_key",
+        "gare_depart_key",
+        "gare_arrivee_key",
+        "heure_depart",
+        "heure_arrivee_prevue",
+        "distance_km",
+        "statut_circulation",
     ]
     return out[cols]
 
@@ -120,8 +152,17 @@ def transform_fact_reservation(
     out = out.merge(fact_trajet_map, on="id_trajet", how="inner")
 
     cols = [
-        "id_reservation", "date_key", "client_key", "trajet_key",
-        "tarif_type", "classe_reservee", "prix_unitaire", "nb_passagers",
-        "montant_total", "canal_vente", "mode_paiement", "statut_reservation",
+        "id_reservation",
+        "date_key",
+        "client_key",
+        "trajet_key",
+        "tarif_type",
+        "classe_reservee",
+        "prix_unitaire",
+        "nb_passagers",
+        "montant_total",
+        "canal_vente",
+        "mode_paiement",
+        "statut_reservation",
     ]
     return out[cols]
