@@ -1,154 +1,202 @@
-# SNCF Data Warehouse & Analytics Pipeline
+# SNCF End-to-End Data Platform
 
-Entrepôt de données (Data Warehouse) et pipeline ETL analysant l'activité
-d'une compagnie ferroviaire fictive : circulation des trains et vente de
-billets, construit de bout en bout avec des outils modernes de Data
-Engineering.
+An end-to-end data engineering pipeline that extracts operational SNCF (French railway) data from an OLTP source database, transforms it, and loads it into a dimensional data warehouse — orchestrated with Apache Airflow and fully containerized with Docker.
 
-## Objectif
+## Overview
 
-- Obtenir un **DW opérationnel** interrogeable pour des indicateurs métier
-  (chiffre d'affaires, taux de remplissage, ponctualité, canaux de vente...).
-- Servir de **projet de portfolio** démontrant une chaîne complète :
-  modélisation dimensionnelle, ETL, orchestration, contrôle qualité,
-  visualisation.
+The platform simulates a realistic railway operations dataset (trains, stations, trips, reservations) and builds a star-schema data warehouse from it, following a classic ETL pattern:
 
-## Origine des données
+```
+raw (OLTP source, sncf_oltp)  --->  ETL (Airflow + Python)  --->  dw (star schema, sncf_dw)
+```
 
-13 fichiers CSV générés de façon synthétique (`data/raw/`), représentant une
-base opérationnelle (OLTP) :
-
-| Fichier | Volumétrie | Rôle |
-|---|---|---|
-| `CLIENT_OLTP_SNCF_100K.csv` | 100 000 lignes | Référentiel clients |
-| `GARE_OLTP_SNCF_198.csv` | 198 lignes | Référentiel gares |
-| `TRAIN_OLTP_SNCF_2500.csv` | 2 500 lignes | Référentiel trains |
-| `TRAJET_2021.csv` … `TRAJET_2025.csv` | ~6 000 000 lignes au total | Un train qui circule un jour donné |
-| `RESERVATION_2021_2M.csv` … `RESERVATION_2025_2M.csv` | ~10 000 000 lignes au total | Un billet vendu |
+- **Source**: `sncf_source` — a normalized OLTP-style database (`raw` schema) with ~6M trips and ~10M reservations.
+- **Warehouse**: `sncf_dw` — a dimensional model (`dw` schema) with 3 dimensions and 2 fact tables, ready for analytics.
+- **Orchestration**: Apache Airflow 3.x, running fully in Docker, on a daily schedule.
 
 ## Architecture
 
-```
-CSV (data/raw/)
-      │  \copy
-      ▼
-PostgreSQL "source" (schéma raw)      ← copie fidèle des CSV
-      │  Python (extract / transform)
-      ▼
-PostgreSQL "DW" (schéma dw)           ← constellation de faits
-      │
-      ▼
-Power BI / dashboard
-```
+### Data model
 
-Deux bases PostgreSQL, dans des conteneurs **Docker** distincts, orchestrées
-avec **Docker Compose** — la base opérationnelle et l'entrepôt sont hébergés
-séparément, comme dans un environnement réel.
+**Dimensions**
+- `dw.dim_client` — passengers (SCD Type 1)
+- `dw.dim_gare` — stations
+- `dw.dim_train` — trains
+- `dw.dim_date` — calendar dimension (pre-generated, 2019–2026)
 
-## Modèle de données du DW
+**Facts**
+- `dw.fact_trajet` — one row per train trip on a given day (grain: train × day)
+- `dw.fact_reservation` — one row per ticket sold (grain: reservation)
 
-Une **constellation de faits** (deux tables de faits partageant les mêmes
-dimensions) plutôt qu'une simple étoile, car deux processus métier distincts
-coexistent : les trains qui circulent, et les billets qui se vendent.
+### Services (Docker Compose)
 
-```
-                    dim_date
-                   /    |    \
-                  /     |     \
-        fact_trajet     |      fact_reservation
-        /    |    \     |       /    |    \
-  dim_train  |  dim_gare        dim_client  (trajet_key → fact_trajet)
-             |  (x2 : départ/arrivée)
-```
-
-| Table | Grain | Mesures / attributs clés |
-|---|---|---|
-| `dim_date` | un jour | année, trimestre, mois, jour de semaine, week-end |
-| `dim_client` | un client | nom, ville, type de client, statut du compte |
-| `dim_gare` | une gare | ville, région, nombre de quais, année de mise en service |
-| `dim_train` | un train | type, capacités par classe, énergie |
-| `fact_trajet` | un train circulant un jour donné | distance, statut de circulation |
-| `fact_reservation` | un billet vendu | prix unitaire, nb passagers, montant total |
-
-## Stack technique
-
-| Composant | Rôle |
+| Service | Role |
 |---|---|
-| PostgreSQL | Stockage (source + DW) |
-| Docker / Docker Compose | Environnement reproductible |
-| Python (pandas / SQLAlchemy) | ETL : extraction, transformation, chargement |
-| Airflow *(à venir)* | Orchestration du pipeline |
-| pytest *(à venir)* | Contrôles de qualité des données |
-| Power BI *(à venir)* | Visualisation et tableaux de bord |
+| `source_db` | PostgreSQL — OLTP source (`raw` schema) |
+| `dw_db` | PostgreSQL — data warehouse (`dw` schema) |
+| `airflow-postgres` | PostgreSQL — Airflow metadata database |
+| `airflow-init` | One-off container: DB migration + admin user creation |
+| `airflow-api-server` | Airflow 3 API server / web UI (port `8080`) |
+| `airflow-scheduler` | Schedules and executes DAG runs (LocalExecutor) |
+| `airflow-dag-processor` | Parses DAG files (separate service since Airflow 3.0) |
+| `airflow-triggerer` | Handles deferrable operators |
 
-## Structure du dépôt
+### ETL pipeline
+
+Implemented in `src/` and orchestrated by the Airflow DAG `sncf_etl_pipeline` (`dags/sncf_etl_dag.py`):
 
 ```
-sncf-dw/
-├── docker-compose.yml
-├── .env                 # non versionné — voir .env.example
-├── data/
-│   └── raw/              # CSV sources (non versionnés si volumineux)
-├── sql/
-│   ├── source/           # DDL du schéma raw (base source)
-│   └── dw/               # DDL du schéma dw (constellation de faits)
-├── src/
-│   ├── extract/
-│   ├── transform/
-│   └── load/
-├── tests/
-└── dags/                 # Airflow, à venir
+purge_dw
+   │
+   ├──► load_dim_client ──┐
+   ├──► load_dim_gare  ───┤
+   └──► load_dim_train ───┤
+                           ▼
+                    load_fact_trajet
+                           │
+                           ▼
+                  load_fact_reservation
+                           │
+                           ▼
+                    quality_check
 ```
 
-## Démarrage
+- **Extraction** (`src/extract/`): reads from `raw.*` via SQLAlchemy/pandas. Large fact tables (trips, reservations — millions of rows) are streamed in chunks using a server-side cursor (`stream_results=True`) rather than loaded into memory all at once.
+- **Transformation** (`src/transform/`): data cleaning (city casing, sex code normalization, electrification flags) and surrogate-key resolution (natural keys from `raw` mapped to warehouse surrogate keys).
+- **Loading** (`src/load/`): bulk loading via PostgreSQL `COPY` (not row-by-row `INSERT`) for performance at scale.
+- **Quality check**: post-load validation — no negative amounts, no orphaned reservations, no unexpectedly empty tables.
+
+## Getting started
+
+### Prerequisites
+
+- Docker and Docker Compose
+- A `.env` file at the project root (see `.env.example` if present, or the variables referenced in `docker-compose.yml`: `SOURCE_DB_*`, `DW_DB_*`, `AIRFLOW_FERNET_KEY`, `AIRFLOW_JWT_SECRET`)
+
+### 1. Start the stack
 
 ```bash
-# 1. Configurer les identifiants
-cp .env.example .env      # puis éditer les mots de passe
-
-# 2. Démarrer les deux bases PostgreSQL
 docker compose up -d
-docker compose ps          # attendre le statut "healthy"
-
-# 3. Charger les CSV dans le schéma raw (base source)
-#    voir sql/source/ et les commandes \copy documentées ci-dessous
 ```
 
-Chargement des tables simples :
+This starts all databases and Airflow services. Airflow's web UI becomes available at [http://localhost:8080](http://localhost:8080) (default login: `admin` / `admin`).
+
+### 2. Initialize the database schemas
+
+The schema creation scripts are **not** run automatically on first boot — they must be applied manually the first time (or wired into `docker-entrypoint-initdb.d/` for automatic init on a fresh volume):
 
 ```bash
-docker exec sncf_source psql -U northwind_user -d sncf_oltp \
-  -c "\copy raw.client FROM '/data/raw/CLIENT_OLTP_SNCF_100K.csv' WITH (FORMAT csv, HEADER true, ENCODING 'UTF8');"
+# Source (raw) schema
+docker cp sql/source/01_schema_raw.sql sncf_source:/schema_raw.sql
+docker exec -it sncf_source psql -U <SOURCE_DB_USER> -d <SOURCE_DB_NAME> -f /schema_raw.sql
+
+# Warehouse (dw) schema
+docker cp sql/dw/01_schema_dw.sql sncf_dw:/schema.sql
+docker exec -it sncf_dw psql -U <DW_DB_USER> -d <DW_DB_NAME> -f /schema.sql
 ```
 
-Puis, pour `trajet` et `reservation`, répéter sur chaque année (2021 à 2025).
+> Replace `<SOURCE_DB_USER>`, `<SOURCE_DB_NAME>`, `<DW_DB_USER>`, `<DW_DB_NAME>` with the values from your `.env` file.
 
-## Qualité des données identifiée au profilage
+### 3. Load the source data
 
-Le profilage initial des CSV a révélé plusieurs incohérences à corriger dans
-la couche de transformation (`raw` → `dw`), volontairement laissées telles
-quelles dans `raw` pour garder une copie fidèle des sources :
+Populate `raw.*` with your dataset (CSV import, seed script, etc. — depends on how you're sourcing the operational data).
 
-- deux colonnes redondantes dans `GARE` (`annee_mise_en_service` /
-  `annee_mise_service`) avec des valeurs divergentes ;
-- valeurs de `sexe` incohérentes (`F` / `Femme`) ;
-- casse de `ville` non uniforme (`Lille`, `STRASBOURG`, `nantes`) ;
-- léger chevauchement de dates entre fichiers annuels de `RESERVATION`.
+### 4. Run the pipeline
 
-## Feuille de route
+From the Airflow UI, trigger the `sncf_etl_pipeline` DAG manually, or wait for its daily schedule (`@daily`, at 00:00 UTC).
 
-- [x] Environnement Docker (deux bases PostgreSQL)
-- [x] Profilage des CSV
-- [x] Conception des schémas `raw` et `dw`
-- [x] Chargement des CSV dans `raw.*`
-- [ ] Script Python de transformation `raw` → `dw`
-- [ ] Contrôles de qualité (pytest)
-- [ ] Orchestration Airflow
-- [ ] Containerisation complète du pipeline
-- [ ] Tableau de bord Power BI
-- [ ] Comparaison avec une implémentation SQL Server équivalente
+From the CLI:
 
-## Licence des données
+```bash
+docker exec -it airflow-scheduler airflow dags trigger sncf_etl_pipeline
+```
 
-Données synthétiques, générées à des fins pédagogiques. Aucune donnée
-personnelle réelle n'est utilisée.
+## Scheduling
+
+The DAG runs **once per day** (`schedule="@daily"`), with `catchup=False` (no backfill of missed runs) and `max_active_runs=1` (only one run at a time, to avoid concurrent writes to the warehouse).
+
+## Testing
+
+The test suite is split into two layers:
+
+### Unit tests (`tests/unit/`)
+
+Fast, fully mocked — no database or Docker required. Cover `extract.py`, `load.py`, `db.py`, and `transform.py`.
+
+```bash
+pytest tests/unit -v
+```
+
+### Integration tests (`tests/integration/`)
+
+Validate real data quality against a live, already-loaded warehouse (row counts, uniqueness, referential integrity, business rules). Automatically skipped if the databases aren't reachable.
+
+```bash
+pytest tests/integration -v
+```
+
+### Full suite with coverage
+
+```bash
+pytest --cov=src tests/ -v
+```
+
+## CI/CD
+
+A GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and pull request to `master`:
+
+- **Lint**: `ruff check`
+- **Formatting**: `ruff format --check`
+- **Unit tests**: `pytest tests/unit` with coverage report uploaded as a build artifact
+
+Integration tests are **not** run in CI (they require live multi-million-row databases) — they're intended for local/manual verification after a pipeline run.
+
+To run the same checks locally before pushing:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+ruff check .
+ruff format --check .
+pytest tests/unit -v --cov=src
+```
+
+## Project structure
+
+```
+.
+├── dags/
+│   └── sncf_etl_dag.py          # Airflow DAG definition
+├── src/
+│   ├── config.py                # Environment-based configuration
+│   ├── db.py                    # SQLAlchemy engines / psycopg2 connections
+│   ├── main.py                  # Standalone (non-Airflow) pipeline entrypoint
+│   ├── extract/
+│   │   └── extract.py
+│   ├── transform/
+│   │   └── transform.py
+│   └── load/
+│       └── load.py
+├── sql/
+│   ├── source/
+│   │   └── 01_schema_raw.sql    # OLTP source schema
+│   └── dw/
+│       └── 01_schema_dw.sql     # Star schema (dimensions + facts)
+├── tests/
+│   ├── conftest.py              # Shared fixtures (DB engines, auto-skip if unreachable)
+│   ├── unit/                    # Mocked, no external dependencies
+│   └── integration/             # Data quality checks against a live warehouse
+├── .github/workflows/ci.yml     # Lint + unit tests on every push/PR
+├── docker-compose.yml
+├── Dockerfile.airflow
+├── requirements.txt
+└── requirements-dev.txt
+```
+
+## Operational notes
+
+A few non-obvious things worth knowing if you're debugging this pipeline:
+
+- **Streaming large extracts**: `extract_chunks()` requires a SQLAlchemy engine created with `execution_options(stream_results=True)` (see `get_source_engine_stream()` in `src/db.py`). Without it, psycopg2 buffers the entire result set client-side before pandas chunks it — which defeats the purpose of chunking and can stall a task for tens of minutes on multi-million-row tables.
+- **Logging, not `print()`**: task callables use the standard `logging` module rather than `print()`. On long-running tasks, Airflow 3's stdout capture pipe can close prematurely (`BrokenPipeError`), which would otherwise mask a successful load as a failed task.
+- **`max_active_runs=1`**: prevents concurrent DAG runs from writing to `fact_trajet`/`fact_reservation` at the same time, which previously caused Postgres deadlocks on the unique index.
+- **Connection timeouts**: `get_dw_connection()` sets `statement_timeout` and `idle_in_transaction_session_timeout` to avoid orphaned connections lingering after a killed task (which can also lead to deadlocks on the next run).
