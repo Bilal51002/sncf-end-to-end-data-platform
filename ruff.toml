@@ -1,0 +1,14 @@
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I"]  # erreurs, pyflakes, warnings, imports mal ordonnes
+ignore = [
+    "E501",  # ligne trop longue : les requetes SQL multi-lignes depassent parfois
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["F401"]  # imports de fixtures parfois non utilises directement
+
+[format]
+quote-style = "double"
