@@ -5,7 +5,6 @@ raisonnable.
 """
 
 import csv
-import io
 import tempfile
 
 import pandas as pd

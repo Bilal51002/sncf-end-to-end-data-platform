@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Import the module to patch its tempfile reference
 import src.load.load as load_module
-
 from src.load.load import fetch_key_map, load_dataframe, truncate_dw  # noqa: E402
 
 

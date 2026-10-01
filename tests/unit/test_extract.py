@@ -33,7 +33,9 @@ class TestExtractFull:
 
         extract_full(engine, "client", schema="raw_remote")
 
-        mock_read_sql.assert_called_once_with("select * from raw_remote.client ORDER BY id_client", engine)
+        mock_read_sql.assert_called_once_with(
+            "select * from raw_remote.client ORDER BY id_client", engine
+        )
 
 
 class TestExtractChunks:
@@ -44,7 +46,9 @@ class TestExtractChunks:
 
         extract_chunks(engine, "trajet", 500_000)
 
-        mock_read_sql.assert_called_once_with("select * from raw.trajet ORDER BY id_trajet", engine, chunksize=500_000)
+        mock_read_sql.assert_called_once_with(
+            "select * from raw.trajet ORDER BY id_trajet", engine, chunksize=500_000
+        )
 
     @patch("src.extract.extract.pd.read_sql")
     def test_retourne_un_iterable_de_chunks(self, mock_read_sql):
