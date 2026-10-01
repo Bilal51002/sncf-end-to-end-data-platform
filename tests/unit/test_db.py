@@ -39,3 +39,14 @@ class TestGetDwConnection:
             password=config.DW_DB_PASSWORD,
             options="-c statement_timeout=900000 -c idle_in_transaction_session_timeout=300000",
         )
+
+
+class TestGetSourceEngineStream:
+    @patch("src.db.create_engine")
+    def test_active_le_streaming_cote_serveur(self, mock_create_engine):
+        mock_engine = mock_create_engine.return_value
+
+        db.get_source_engine_stream()
+
+        mock_create_engine.assert_called_once_with(config.SOURCE_DB_URL)
+        mock_engine.execution_options.assert_called_once_with(stream_results=True)

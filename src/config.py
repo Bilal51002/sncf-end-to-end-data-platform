@@ -33,4 +33,6 @@ DW_DB_URL = (
 )
 
 # Taille des lots pour le traitement des grandes tables (trajet, reservation)
-CHUNK_SIZE = int(os.getenv("ETL_CHUNK_SIZE", "500000"))
+# Reduced from 500000 to 50000 to prevent OOM kills during COPY buffer creation
+# and when merging with large dimension maps (fact_trajet_map has 6M rows)
+CHUNK_SIZE = int(os.getenv("ETL_CHUNK_SIZE", "50000"))

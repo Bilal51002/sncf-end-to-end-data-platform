@@ -39,6 +39,93 @@ class TestNormalizeVille:
         assert list(result) == ["Strasbourg", "Nantes", "Lyon", "Paris"]
 
 
+from src.transform.transform import (  # noqa: E402
+    transform_dim_client,
+    transform_dim_train,
+)
+
+
+class TestTransformDimClient:
+    def test_sexe_et_ville_normalises(self):
+        df = pd.DataFrame(
+            {
+                "id_client": [1, 2],
+                "nom": ["Martin", "Dupont"],
+                "prenom": ["Jean", "Marie"],
+                "date_naissance": pd.to_datetime(["1990-01-01", "1985-05-20"]),
+                "sexe": ["homme", "F"],
+                "type_client": ["Standard", "Premium"],
+                "ville": ["STRASBOURG", "nantes"],
+                "code_postal": ["67000", "44000"],
+                "pays": ["France", "France"],
+                "email": ["jean@test.fr", "marie@test.fr"],
+                "telephone": ["0600000000", "0600000001"],
+                "date_creation_compte": pd.to_datetime(["2020-01-01", "2021-01-01"]),
+                "statut_compte": ["Actif", "Actif"],
+            }
+        )
+
+        result = transform_dim_client(df)
+
+        assert list(result["sexe"]) == ["H", "F"]
+        assert list(result["ville"]) == ["Strasbourg", "Nantes"]
+        assert list(result.columns) == [
+            "id_client",
+            "nom",
+            "prenom",
+            "date_naissance",
+            "sexe",
+            "type_client",
+            "ville",
+            "code_postal",
+            "pays",
+            "email",
+            "telephone",
+            "date_creation_compte",
+            "statut_compte",
+        ]
+
+
+class TestTransformDimTrain:
+    def test_villes_depart_et_arrivee_normalisees(self):
+        df = pd.DataFrame(
+            {
+                "id_train": [1],
+                "code_train": ["TGV001"],
+                "type_train": ["TGV"],
+                "capacite_totale": [500],
+                "capacite_classe1": [100],
+                "capacite_classe2": [400],
+                "ville_depart": ["PARIS"],
+                "ville_arrivee": ["lyon"],
+                "annee_mise_en_service": [2015],
+                "statut_train": ["En service"],
+                "duree_estimee_minutes": [120],
+                "energie": ["Electrique"],
+            }
+        )
+
+        result = transform_dim_train(df)
+
+        assert result["ville_depart_base"].iloc[0] == "Paris"
+        assert result["ville_arrivee_base"].iloc[0] == "Lyon"
+        assert "ville_depart" not in result.columns
+        assert list(result.columns) == [
+            "id_train",
+            "code_train",
+            "type_train",
+            "capacite_totale",
+            "capacite_classe1",
+            "capacite_classe2",
+            "ville_depart_base",
+            "ville_arrivee_base",
+            "annee_mise_en_service",
+            "statut_train",
+            "duree_estimee_minutes",
+            "energie",
+        ]
+
+
 class TestToDateKey:
     def test_format_yyyymmdd(self):
         s = pd.Series(pd.to_datetime(["2021-03-15", "2024-12-01"]))

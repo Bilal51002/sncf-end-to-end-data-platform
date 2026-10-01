@@ -19,6 +19,7 @@ services:
     volumes:
       - source_db_data:/var/lib/postgresql/data
       - ./data:/data:ro
+      - ./sql/source:/docker-entrypoint-initdb.d
 
     healthcheck:
       test:
@@ -49,6 +50,7 @@ services:
 
     volumes:
       - dw_db_data:/var/lib/postgresql/data
+      - ./sql/dw:/docker-entrypoint-initdb.d
 
     healthcheck:
       test:
@@ -185,6 +187,7 @@ services:
       SOURCE_DB_PORT: "5432"
       DW_DB_HOST: dw_db
       DW_DB_PORT: "5432"
+      AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT: "1800"
 
     volumes:
       - ./dags:/opt/airflow/dags
@@ -230,6 +233,7 @@ services:
       AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
       AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
       AIRFLOW__SCHEDULER__SCHEDULER_ZOMBIE_TASK_THRESHOLD: "1800"
+      AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT: "1800"
 
       PYTHONPATH: /opt/airflow
 
