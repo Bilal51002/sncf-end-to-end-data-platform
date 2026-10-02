@@ -1,3 +1,49 @@
+# ============================================================
+# SNCF End-TO-END DATA PLATFORM
+# Docker Compose
+# ============================================================
+
+x-airflow-common-env: &airflow-common-env
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow}@airflow-postgres:5432/airflow
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+  AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+
+  # Airflow 3 Execution API
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+  AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+  AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
+
+  # Local project code
+  PYTHONPATH: /opt/airflow
+
+  # Pipeline databases: internal Docker service names and ports
+  SOURCE_DB_HOST: source_db
+  SOURCE_DB_PORT: "5432"
+  SOURCE_DB_NAME: ${SOURCE_DB_NAME}
+  SOURCE_DB_USER: ${SOURCE_DB_USER}
+  SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD}
+
+  DW_DB_HOST: dw_db
+  DW_DB_PORT: "5432"
+  DW_DB_NAME: ${DW_DB_NAME}
+  DW_DB_USER: ${DW_DB_USER}
+  DW_DB_PASSWORD: ${DW_DB_PASSWORD}
+
+  ETL_CHUNK_SIZE: ${ETL_CHUNK_SIZE:-100000}
+
+x-airflow-common-volumes: &airflow-common-volumes
+  - ./dags:/opt/airflow/dags
+  - airflow_logs:/opt/airflow/logs
+  - ./plugins:/opt/airflow/plugins
+  - ./src:/opt/airflow/src
+
+x-airflow-build: &airflow-build
+  context: .
+  dockerfile: Dockerfile.airflow
+
+
 services:
 
   # ============================================================
@@ -14,12 +60,12 @@ services:
       POSTGRES_PASSWORD: ${SOURCE_DB_PASSWORD}
 
     ports:
-      - "${SOURCE_DB_PORT}:5432"
+      - "${SOURCE_DB_PORT:-5433}:5432"
 
     volumes:
       - source_db_data:/var/lib/postgresql/data
       - ./data:/data:ro
-      - ./sql/source:/docker-entrypoint-initdb.d
+      - ./sql/source:/docker-entrypoint-initdb.d:ro
 
     healthcheck:
       test:
@@ -29,7 +75,8 @@ services:
         ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
 
 
   # ============================================================
@@ -46,11 +93,11 @@ services:
       POSTGRES_PASSWORD: ${DW_DB_PASSWORD}
 
     ports:
-      - "${DW_DB_PORT}:5432"
+      - "${DW_DB_PORT:-5434}:5432"
 
     volumes:
       - dw_db_data:/var/lib/postgresql/data
-      - ./sql/dw:/docker-entrypoint-initdb.d
+      - ./sql/dw:/docker-entrypoint-initdb.d:ro
 
     healthcheck:
       test:
@@ -60,12 +107,12 @@ services:
         ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
 
 
   # ============================================================
   # AIRFLOW METADATA DATABASE
-  # (simple conteneur Postgres : n'a besoin d'aucune variable Airflow)
   # ============================================================
   airflow-postgres:
     image: postgres:16
@@ -75,7 +122,7 @@ services:
     environment:
       POSTGRES_DB: airflow
       POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:-airflow}
 
     volumes:
       - airflow_postgres_data:/var/lib/postgresql/data
@@ -88,17 +135,16 @@ services:
         ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
 
 
   # ============================================================
   # AIRFLOW INIT
+  # One-off container: migrate metadata DB + create admin user
   # ============================================================
   airflow-init:
-    build:
-      context: .
-      dockerfile: Dockerfile.airflow
-
+    build: *airflow-build
     container_name: airflow-init
 
     depends_on:
@@ -106,61 +152,32 @@ services:
         condition: service_healthy
 
     environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      <<: *airflow-common-env
 
-      # Airflow 3 authentication manager
-      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-
-      # Airflow 3 (AIP-72) : les taches communiquent avec le scheduler via
-      # une API HTTP, pas par acces direct a la base. Sans ces variables,
-      # identiques sur tous les services, chaque tache echoue avec
-      # "Connection refused" ou "Invalid auth token".
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
-      # Duree de vie du jeton (secondes) : le defaut est trop court pour
-      # des taches qui transforment plusieurs millions de lignes.
-      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
-
-      # Allow Airflow to load local source code
-      PYTHONPATH: /opt/airflow
-
-      # Bases de donnees du pipeline (noms de service Docker, pas localhost)
-      SOURCE_DB_HOST: source_db
-      SOURCE_DB_PORT: "5432"
-      DW_DB_HOST: dw_db
-      DW_DB_PORT: "5432"
-
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./src:/opt/airflow/src
+    volumes: *airflow-common-volumes
 
     command:
       - bash
       - -c
       - |
+        set -e
+
         airflow db migrate
 
         airflow users create \
-          --username admin \
-          --password admin \
-          --firstname Bilal \
-          --lastname Khallabi \
+          --username "${AIRFLOW_ADMIN_USER:-admin}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD:-admin}" \
+          --firstname "${AIRFLOW_ADMIN_FIRSTNAME:-Bilal}" \
+          --lastname "${AIRFLOW_ADMIN_LASTNAME:-Khallabi}" \
           --role Admin \
-          --email admin@example.com || true
+          --email "${AIRFLOW_ADMIN_EMAIL:-admin@example.com}" || true
 
 
   # ============================================================
-  # AIRFLOW API SERVER
+  # AIRFLOW API SERVER / WEB UI
   # ============================================================
   airflow-api-server:
-    build:
-      context: .
-      dockerfile: Dockerfile.airflow
-
+    build: *airflow-build
     container_name: airflow-api-server
     restart: unless-stopped
 
@@ -171,29 +188,10 @@ services:
         condition: service_completed_successfully
 
     environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
-
-      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
-      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
-
-      PYTHONPATH: /opt/airflow
-
-      SOURCE_DB_HOST: source_db
-      SOURCE_DB_PORT: "5432"
-      DW_DB_HOST: dw_db
-      DW_DB_PORT: "5432"
+      <<: *airflow-common-env
       AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT: "1800"
 
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./src:/opt/airflow/src
+    volumes: *airflow-common-volumes
 
     ports:
       - "8080:8080"
@@ -202,17 +200,25 @@ services:
       - bash
       - -c
       - |
-        airflow api-server --host 0.0.0.0 --port 8080
+        exec airflow api-server --host 0.0.0.0 --port 8080
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/api/v2/version', timeout=5)\""
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
 
   # ============================================================
   # AIRFLOW SCHEDULER
   # ============================================================
   airflow-scheduler:
-    build:
-      context: .
-      dockerfile: Dockerfile.airflow
-
+    build: *airflow-build
     container_name: airflow-scheduler
     restart: unless-stopped
 
@@ -221,48 +227,32 @@ services:
         condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+      airflow-api-server:
+        condition: service_healthy
+      source_db:
+        condition: service_healthy
+      dw_db:
+        condition: service_healthy
 
     environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
-
-      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
-      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
+      <<: *airflow-common-env
       AIRFLOW__SCHEDULER__SCHEDULER_ZOMBIE_TASK_THRESHOLD: "1800"
       AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT: "1800"
 
-      PYTHONPATH: /opt/airflow
-
-      SOURCE_DB_HOST: source_db
-      SOURCE_DB_PORT: "5432"
-      DW_DB_HOST: dw_db
-      DW_DB_PORT: "5432"
-
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./src:/opt/airflow/src
+    volumes: *airflow-common-volumes
 
     command:
       - bash
       - -c
       - |
-        airflow scheduler
+        exec airflow scheduler
 
 
   # ============================================================
   # AIRFLOW DAG PROCESSOR
   # ============================================================
   airflow-dag-processor:
-    build:
-      context: .
-      dockerfile: Dockerfile.airflow
-
+    build: *airflow-build
     container_name: airflow-dag-processor
     restart: unless-stopped
 
@@ -273,44 +263,22 @@ services:
         condition: service_completed_successfully
 
     environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      <<: *airflow-common-env
 
-      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
-      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
-
-      PYTHONPATH: /opt/airflow
-
-      SOURCE_DB_HOST: source_db
-      SOURCE_DB_PORT: "5432"
-      DW_DB_HOST: dw_db
-      DW_DB_PORT: "5432"
-
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./src:/opt/airflow/src
+    volumes: *airflow-common-volumes
 
     command:
       - bash
       - -c
       - |
-        airflow dag-processor
+        exec airflow dag-processor
 
 
   # ============================================================
   # AIRFLOW TRIGGERER
   # ============================================================
   airflow-triggerer:
-    build:
-      context: .
-      dockerfile: Dockerfile.airflow
-
+    build: *airflow-build
     container_name: airflow-triggerer
     restart: unless-stopped
 
@@ -321,40 +289,22 @@ services:
         condition: service_completed_successfully
 
     environment:
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      <<: *airflow-common-env
 
-      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
-      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
-      AIRFLOW__EXECUTION_API__JWT_EXPIRATION_TIME: "3600"
-
-      PYTHONPATH: /opt/airflow
-
-      SOURCE_DB_HOST: source_db
-      SOURCE_DB_PORT: "5432"
-      DW_DB_HOST: dw_db
-      DW_DB_PORT: "5432"
-
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-      - ./src:/opt/airflow/src
+    volumes: *airflow-common-volumes
 
     command:
       - bash
       - -c
       - |
-        airflow triggerer
+        exec airflow triggerer
 
 
 # ============================================================
-# VOLUMES
+# PERSISTENT VOLUMES
 # ============================================================
 volumes:
   source_db_data:
   dw_db_data:
   airflow_postgres_data:
+  airflow_logs:

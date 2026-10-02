@@ -3,19 +3,25 @@
 
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
 .venv/
 venv/
 .pytest_cache/
+.coverage
+htmlcov/
 
 # IDE / OS
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
 
-# Airflow (plus tard)
+# Airflow
 logs/
 
-# Raw data
+# Raw / local data
 data/
-"data/" 
+
+# Misc
+*.log
